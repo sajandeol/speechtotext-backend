@@ -21,7 +21,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 # CPU-safe Whisper (your original)
-model = whisper.load_model("medium", device="cpu")
+model = whisper.load_model("small", device="cpu")
 
 
 def send_email_alert(filename: str, duration: float):
