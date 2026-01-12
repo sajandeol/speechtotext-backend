@@ -1,5 +1,5 @@
 from faster_whisper import WhisperModel
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Request
 import uvicorn
 import tempfile
 import os
@@ -25,13 +25,13 @@ logger = logging.getLogger(__name__)
 # ---------------- MODEL (CPU) ----------------
 # int8 is fastest + lowest memory on CPU
 model = WhisperModel(
-    "small",
+    "large",
     device="cpu",
     compute_type="int8"
 )
 
 # ---------------- EMAIL ALERT ----------------
-def send_email_alert(filename: str, duration: float):
+def send_email_alert(filename: str, duration: float, client_ip: str):
     msg = EmailMessage()
     msg["Subject"] = "🎤 Whisper Transcription Used"
     msg["From"] = os.environ["ALERT_EMAIL"]
@@ -42,6 +42,7 @@ A transcription job was submitted.
 
 File: {filename}
 Processing time: {duration:.2f} seconds
+Client IP: {client_ip}
 Timestamp: {datetime.utcnow()} UTC
 """)
 
@@ -51,10 +52,19 @@ Timestamp: {datetime.utcnow()} UTC
             os.environ["ALERT_EMAIL_PASSWORD"]
         )
         server.send_message(msg)
+# ------------- GET PUBLIC IP --------------
+
+def get_client_ip(request: Request) -> str:
+    # If behind a proxy / load balancer
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+
+    return request.client.host
 
 # ---------------- ENDPOINT ----------------
 @app.post("/transcribe")
-async def transcribe(file: UploadFile = File(...)):
+async def transcribe(request: Request, file: UploadFile = File(...)):
     suffix = os.path.splitext(file.filename)[-1] or ".wav"
     start_time = time.perf_counter()
     logger.info(f"Job Started: {file.filename}")
@@ -74,10 +84,11 @@ async def transcribe(file: UploadFile = File(...)):
 
     # Match old Whisper response format
     text = "".join(segment.text for segment in segments)
-
+    # Grab IP
+    client_ip = get_client_ip(request)
     # Timing + alert
     job_time = time.perf_counter() - start_time
-    send_email_alert(file.filename, job_time)
+    send_email_alert(file.filename, job_time, client_ip)
 
     logger.info(f"Job {file.filename} completed in {job_time:.2f}s")
 
