@@ -55,16 +55,26 @@ Timestamp: {datetime.utcnow()} UTC
 # ------------- GET PUBLIC IP --------------
 
 def get_client_ip(request: Request) -> str:
-    # If behind a proxy / load balancer
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-
-    return request.client.host
+    """
+    Returns the real client IP when behind Cloudflare + reverse proxies.
+    Priority:
+    1. Cloudflare
+    2. Standard proxy headers
+    3. Direct connection
+    """
+    return (
+        request.headers.get("cf-connecting-ip")
+        or request.headers.get("x-forwarded-for")
+        or request.headers.get("x-real-ip")
+        or request.client.host
+    )
 
 # ---------------- ENDPOINT ----------------
 @app.post("/transcribe")
 async def transcribe(request: Request, file: UploadFile = File(...)):
+    #Log headers for Debugging
+    logger.info(dict(request.headers))
+
     suffix = os.path.splitext(file.filename)[-1] or ".wav"
     start_time = time.perf_counter()
     logger.info(f"Job Started: {file.filename}")
@@ -98,4 +108,8 @@ async def transcribe(request: Request, file: UploadFile = File(...)):
 
 # ---------------- RUN ----------------
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=9000)
+    uvicorn.run(app, host="0.0.0.0",
+    port=9000,
+    proxy_headers=True,
+    forwarded_allow_ips="*"
+)
